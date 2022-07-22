@@ -2,14 +2,30 @@ const { request, gql } = require('graphql-request');
 const utils = require('../utils');
 const { default: BigNumber } = require('bignumber.js');
 
-const baseUrl = 'https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v2'
-const givUnipoolTokenDistributorUrl = 'https://api.thegraph.com/subgraphs/name/aminlatifi/giveth-economy-xdai'
+const urlUniswapV2 = 'https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v2'
+const urlHoneyswapV2 = 'https://api.thegraph.com/subgraphs/name/1hive/honeyswap-v2';
+const urlGivEconomyMainnet = 'https://api.thegraph.com/subgraphs/name/giveth/giveth-economy-mainnet'
+const urlGivEconomyGnosis = 'https://api.thegraph.com/subgraphs/name/giveth/giveth-economy-xdai';
 
-const givTokenAddress = '0x900db999074d9277c5da2a43f252d74366230da0'
+// GIV Token
+const givTokenMainnetAddress = '0x900db999074d9277c5da2a43f252d74366230da0';
+const givTokenGnosisAddress = '0x4f4f9b8d5b4d0dc10506e5551b0513b61fd59e75';
 
-const uniV2DaiGivQuery = gql`
+// GIV 100% UNIPOOL LM
+const givMainnetContractInfo = '0x4b9efae862a1755f7cecb021856d467e86976755';
+const givGnosisContractInfo = '0xd93d3bdba18ebcb3317a57119ea44ed2cf41c2f2';
+
+// Giv - Dai Mainnet LP
+const givDaiPairMainnetAddress = '0xbeba1666c62c65e58770376de332891b09461eeb';
+const givDaiPairUnipoolContractInfo = '0xa4523d703f663615bd41606b46b58deb2f926d98';
+
+// Giv - Xdai Gnosis LP
+const givDaiPairGnosisAddress = '0xb7189a7ea38fa31210a79fe282aec5736ad5fa57';
+const givDaiPairGnosisUnipoolContractInfo = '0x24a6067fed46dc8663794c4d39ec91b074cf85d4';
+
+const tokenPairPoolQuery = gql`
   {
-    pair(id: "0xbeba1666c62c65e58770376de332891b09461eeb") {
+    pair(id: "<PLACEHOLDER>") {
       id
       reserveUSD
       volumeUSD
@@ -28,36 +44,19 @@ const uniV2DaiGivQuery = gql`
   }
 `;
 
-// first one is GIV LM token distributor
-const givLMUnipoolTokenDistributor = gql`
+const unipoolContractInfoQuery = gql`
   {
-    unipoolContractInfos(first: 1) {
+    unipoolContractInfo(id: "<PLACEHOLDER>" ) {
       id
-      rewardRate
       totalSupply
+      rewardRate
     }
   }
 `;
 
-const fetchFarmData = async (
-  chainString,
-  url,
-  query,
-  version
-) => {
-  let farmData = await request(url, query);
-  farmData = farmData.pair;
+const calculatePairApy = async (chainString, entry, contractInfo) => {
+  const givTokenAddress = chainString === 'ethereum' ? givTokenMainnetAddress : givTokenGnosisAddress;
 
-  const rewardRates = (await request(givUnipoolTokenDistributorUrl, givLMUnipoolTokenDistributor)).unipoolContractInfos;
-
-  farmData['apy'] = await calculateApy(farmData, rewardRates);
-
-  const data = buildFarmObj(farmData, version, chainString);
-
-  return data;
-}
-
-const calculateApy = async (entry, rewardRatesEntry) => {
   const tokenReserve = BigNumber(
     entry.token0.id.toLowerCase() !== givTokenAddress
       ? entry.reserve1
@@ -69,11 +68,11 @@ const calculateApy = async (entry, rewardRatesEntry) => {
     .div(2)
     .div(tokenReserve);
 
-  const totalSupply = BigNumber(rewardRatesEntry[0].totalSupply);
+  const totalSupply = BigNumber(contractInfo.totalSupply);
 
   const apr = totalSupply.isZero()
     ? null
-    : BigNumber(rewardRatesEntry[0].rewardRate)
+    : BigNumber(contractInfo.rewardRate)
         .div(totalSupply)
         .times('31536000')
         .times('100')
@@ -83,28 +82,120 @@ const calculateApy = async (entry, rewardRatesEntry) => {
   return apr;
 }
 
+const calculateUnipoolTvl = async (chainString, entry) => {
+  const givTokenAddress = chainString === 'ethereum' ? givTokenMainnetAddress : givTokenGnosisAddress;
 
-const buildFarmObj = async (entry, version, chainString) => {
-  const symbol = utils.formatSymbol(
-    `${entry.token0.symbol}-${entry.token1.symbol}`
-  );
+  // DefiLlama price api
+  const defiLlamaGivId = `${chainString}:${givTokenAddress}`;
+  const idsSet = [defiLlamaGivId];
+  let prices = await utils.getData('https://coins.llama.fi/prices', {
+    coins: idsSet,
+  });
+  prices = prices.coins;
+  const price = prices[defiLlamaGivId]?.price;
+
+  const tvl = BigNumber(entry.totalSupply) * price;
+
+  return tvl;
+}
+
+const calculateUnipoolApy = async (entry) => {
+  const totalSupply = BigNumber(entry.totalSupply);
+  const rewardRate = BigNumber(entry.rewardRate);
+
+  const apr = totalSupply.isZero()
+    ? 0
+    : rewardRate.div(totalSupply).times('31536000').times('100');
+
+  return apr;
+}
+
+const buildPool = async (entry, chainString) => {
+  const symbol = entry?.token0 ?
+    `${entry.token0.symbol}-${entry.token1.symbol}` : 'GIV';
 
   const newObj = {
     pool: entry.id,
     chain: utils.formatChain(chainString),
-    project: 'uniswap',
-    market: version,
+    project: 'giveth',
     symbol: symbol,
-    tvlUsd: Number(entry.reserveUSD),
-    apy: Number(entry.apy),
+    tvlUsd: Number(entry.reserveUSD), // number representing current USD TVL in pool
+    apy: Number(entry.apy), // current APY of the pool in %
   };
 
   return newObj;
 }
 
+const topLvl = async (
+  chainString,
+  poolUrl,
+  poolQuery,
+  poolAddress,
+  contractInfoUrl,
+  contractInfoQuery,
+  contractInfoAddress,
+) => {
+  let data;
+  if (poolUrl) { // Pair
+    let farmData = await request(poolUrl, poolQuery.replace('<PLACEHOLDER>', poolAddress));
+    farmData = farmData.pair;
+
+    const contractInfo = (await request(contractInfoUrl, contractInfoQuery.replace('<PLACEHOLDER>', contractInfoAddress))).unipoolContractInfo;
+
+    farmData['apy'] = await calculatePairApy(chainString, farmData, contractInfo);
+    data = buildPool(farmData, chainString);
+  } else { // Unipool
+    const farmData = (await request(contractInfoUrl, contractInfoQuery.replace('<PLACEHOLDER>', contractInfoAddress))).unipoolContractInfo;
+
+    farmData['reserveUSD'] = await calculateUnipoolTvl(chainString, farmData);
+    farmData['apy'] = await calculateUnipoolApy(farmData);
+
+    data = buildPool(farmData, chainString);
+  }
+
+  return data;
+}
+
 const main = async () => {
   let data = await Promise.all([
-    fetchFarmData('ethereum', baseUrl, uniV2DaiGivQuery, 'v2')
+    // ETH Mainnet
+    topLvl(
+      'ethereum',
+      null,
+      tokenPairPoolQuery,
+      null,
+      urlGivEconomyMainnet,
+      unipoolContractInfoQuery,
+      givMainnetContractInfo
+    ),
+    topLvl(
+      'ethereum',
+      urlUniswapV2,
+      tokenPairPoolQuery,
+      givDaiPairMainnetAddress,
+      urlGivEconomyMainnet,
+      unipoolContractInfoQuery,
+      givDaiPairUnipoolContractInfo
+    ),
+    // // Gnosis
+    topLvl(
+      'xdai',
+      urlHoneyswapV2,
+      tokenPairPoolQuery,
+      givDaiPairGnosisAddress,
+      urlGivEconomyGnosis,
+      unipoolContractInfoQuery,
+      givDaiPairGnosisUnipoolContractInfo,
+    ),
+    topLvl(
+      'xdai',
+      null,
+      tokenPairPoolQuery,
+      null,
+      urlGivEconomyGnosis,
+      unipoolContractInfoQuery,
+      givGnosisContractInfo
+    ),
   ]);
 
   return data;
