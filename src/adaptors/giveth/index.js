@@ -148,9 +148,15 @@ const calculateUnipoolTvl = async (chainString, totalSupply) => {
     coins: idsSet,
   });
   prices = prices.coins;
+  console.log({ prices });
   const price = prices[defiLlamaGivId]?.price;
   const tvl = BigNumber(totalSupply) * price;
   return tvl;
+};
+
+const calculateBalancerTvl = async (chainString, tokens, amounts) => {
+  // TODO: Sum all tokens and their balances from the BAL pool
+  return NaN;
 };
 
 const calculateUnipoolApy = async (entry) => {
@@ -211,10 +217,9 @@ const balancerTopLvlMain = async (poolId) => {
     unipoolContractInfoQuery.replace('<PLACEHOLDER>', givEthBalancerAddress)
   );
   contractInfo = contractInfo.unipool;
-  console.log({ SUPP: farmData.totalSupply, SUP2: contractInfo });
   farmData['reserveUSD'] = await calculateUnipoolTvl(
     chainString,
-    farmData.totalSupply
+    farmData.totalShares
   );
   farmData['apy'] = await balancerCalculatePoolApy(
     chainString,
