@@ -94,7 +94,6 @@ const getPrices = async (tokens = []) => {
   let prices = await utils.getData('https://coins.llama.fi/prices', {
     coins: idsSet,
   });
-  console.log({ prices });
   return prices.coins;
 };
 
