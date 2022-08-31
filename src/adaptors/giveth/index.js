@@ -1,5 +1,6 @@
 const { request, gql } = require('graphql-request');
 const utils = require('../utils');
+const fetch = require('node-fetch');
 const { default: BigNumber } = require('bignumber.js');
 
 const secsInOneYear = 31536000;
@@ -15,6 +16,7 @@ const urlGivEconomyGnosis =
   'https://api.thegraph.com/subgraphs/name/giveth/giveth-economy-xdai';
 const urlBalancer =
   'https://api.thegraph.com/subgraphs/name/balancer-labs/balancer-v2';
+const urlIchi = 'https://api.ichi.org/v1/farms/20009';
 
 // GIV Token
 const givTokenMainnetAddress = '0x900db999074d9277c5da2a43f252d74366230da0';
@@ -33,6 +35,12 @@ const givDaiPairUnipoolContractInfo =
 const givEthBalancerPoolId =
   '0x7819f1532c49388106f7762328c51ee70edd134c000200000000000000000109';
 const givEthBalancerAddress = '0xc0dbdca66a0636236fabe1b3c16b1bd4c84bb1e1';
+
+// ICHI Angel Vault
+const oneGivPairUnipoolContractInfo =
+  '0xa4b727df6fd608d1835e3440288c73fb28c4ef16';
+
+const defiLlamaGivId = `ethereum:${givTokenMainnetAddress}`;
 
 const tokenPairPoolQuery = gql`
   {
@@ -81,6 +89,15 @@ const unipoolContractInfoQuery = gql`
   }
 `;
 
+const getPrices = async (tokens = []) => {
+  const idsSet = [defiLlamaGivId, ...tokens];
+  let prices = await utils.getData('https://coins.llama.fi/prices', {
+    coins: idsSet,
+  });
+  console.log({ prices });
+  return prices.coins;
+};
+
 const balancerCalculatePoolApy = async (chainString, entry, contractInfo) => {
   const givTokenAddress =
     chainString === 'ethereum' ? givTokenMainnetAddress : givTokenGnosisAddress;
@@ -115,7 +132,6 @@ const balancerCalculatePoolApy = async (chainString, entry, contractInfo) => {
 const calculatePairApy = async (chainString, entry, contractInfo) => {
   const givTokenAddress =
     chainString === 'ethereum' ? givTokenMainnetAddress : givTokenGnosisAddress;
-
   const tokenReserve = BigNumber(
     entry.token0.id.toLowerCase() !== givTokenAddress
       ? entry.reserve1
@@ -139,17 +155,8 @@ const calculatePairApy = async (chainString, entry, contractInfo) => {
 
   return apr;
 };
-
 const calculateUnipoolTvl = async (chainString, totalSupply) => {
-  const givTokenAddress =
-    chainString === 'ethereum' ? givTokenMainnetAddress : givTokenGnosisAddress;
-  // DefiLlama price api
-  const defiLlamaGivId = `${chainString}:${givTokenAddress}`;
-  const idsSet = [defiLlamaGivId];
-  let prices = await utils.getData('https://coins.llama.fi/prices', {
-    coins: idsSet,
-  });
-  prices = prices.coins;
+  const prices = await getPrices([]);
   const price = prices[defiLlamaGivId]?.price;
   const tvl = BigNumber(totalSupply) * price;
   return tvl;
@@ -162,15 +169,11 @@ const calculateBalancerTvl = async (chainString, tokens) => {
   if (tokens[0].address.toLowerCase() !== givTokenAddress) {
     token1Address = tokens[0].address.toLowerCase();
   }
-  const defiLlamaGivId = `${chainString}:${givTokenAddress}`;
   const defiLlamaWethId = `${chainString}:${token1Address}`;
   const givSupply = tokens.find((i) => i.symbol === 'GIV').balance;
   const wethSupply = tokens.find((i) => i.symbol === 'WETH').balance;
-  const idsSet = [defiLlamaGivId, defiLlamaWethId];
-  let prices = await utils.getData('https://coins.llama.fi/prices', {
-    coins: idsSet,
-  });
-  prices = prices.coins;
+
+  const prices = await getPrices([defiLlamaWethId], chainString);
   const givPrice = prices[defiLlamaGivId]?.price;
   const wethPrice = prices[defiLlamaWethId]?.price;
   const tvl =
@@ -206,8 +209,10 @@ const buildBalancerPool = async (entry, chainString) => {
   return newObj;
 };
 
-const buildPool = async (entry, chainString) => {
-  const symbol = entry?.token0
+const buildPool = async (entry, chainString, customName) => {
+  const symbol = customName
+    ? customName
+    : entry?.token0
     ? `${entry.token0.symbol}-${entry.token1.symbol}`
     : 'GIV';
 
@@ -249,6 +254,44 @@ const balancerTopLvlGivWeth = async () => {
 
   data = buildBalancerPool(farmData, chainString);
 
+  return data;
+};
+
+const topLvlIchi = async (
+  chainString,
+  contractInfoUrl,
+  contractInfoQuery,
+  contractInfoAddress
+) => {
+  let data;
+  let farmData = await fetch(urlIchi).then((res) => res.json());
+  let contractInfo = await request(
+    contractInfoUrl,
+    contractInfoQuery.replace('<PLACEHOLDER>', contractInfoAddress)
+  );
+
+  contractInfo = contractInfo.unipool;
+  const defiLlamaGivId = `${chainString}:${givTokenMainnetAddress}`;
+
+  const prices = await getPrices([], chainString);
+
+  const givTokenPrice = prices[defiLlamaGivId]?.price;
+  const totalSupply = BigNumber(contractInfo.totalSupply);
+  const rewardRate = BigNumber(contractInfo.rewardRate);
+  const lpPrice = BigNumber(farmData.lpPrice);
+  const vaultIRR = BigNumber(farmData.vaultIRR);
+
+  const totalAPR = rewardRate
+    .div(totalSupply)
+    .times(givTokenPrice)
+    .div(lpPrice)
+    .times(secsInOneYear)
+    .times('100')
+    .plus(vaultIRR);
+  farmData['apy'] = totalAPR;
+  farmData['id'] = farmData.lpAddress;
+  farmData['reserveUSD'] = farmData.tvl;
+  data = buildPool(farmData, chainString, 'oneGIV-GIV');
   return data;
 };
 
@@ -318,6 +361,12 @@ const main = async () => {
       urlGivEconomyMainnet,
       unipoolContractInfoQuery,
       givDaiPairUnipoolContractInfo
+    ),
+    topLvlIchi(
+      'ethereum',
+      urlGivEconomyMainnet,
+      unipoolContractInfoQuery,
+      oneGivPairUnipoolContractInfo
     ),
     balancerTopLvlGivWeth(),
   ]);
