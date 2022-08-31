@@ -85,9 +85,6 @@ const balancerCalculatePoolApy = async (chainString, entry, contractInfo) => {
   const givTokenAddress =
     chainString === 'ethereum' ? givTokenMainnetAddress : givTokenGnosisAddress;
 
-  const tokenReserve = entry.tokens.find(
-    (i) => i.address === givTokenAddress
-  ).balance;
   const weights = [entry.tokens[0].weight, entry.tokens[1].weight].map(
     toBigNumberJs
   );
@@ -95,11 +92,16 @@ const balancerCalculatePoolApy = async (chainString, entry, contractInfo) => {
     toBigNumberJs
   );
 
+  if (entry.tokens[0].address.toLowerCase() !== givTokenAddress) {
+    balances.reverse();
+    weights.reverse();
+  }
+
   const lp = BigNumber(entry.totalShares)
     .div(BigNumber.sum(...weights).div(weights[0]))
-    .div(tokenReserve);
+    .div(balances[0]);
 
-  const totalSupply = BigNumber(entry.totalShares);
+  const totalSupply = BigNumber(contractInfo.totalSupply);
   const apr = totalSupply.isZero()
     ? null
     : BigNumber(contractInfo.rewardRate)
@@ -148,15 +150,32 @@ const calculateUnipoolTvl = async (chainString, totalSupply) => {
     coins: idsSet,
   });
   prices = prices.coins;
-  console.log({ prices });
   const price = prices[defiLlamaGivId]?.price;
   const tvl = BigNumber(totalSupply) * price;
   return tvl;
 };
 
-const calculateBalancerTvl = async (chainString, tokens, amounts) => {
-  // TODO: Sum all tokens and their balances from the BAL pool
-  return NaN;
+const calculateBalancerTvl = async (chainString, tokens) => {
+  const givTokenAddress =
+    chainString === 'ethereum' ? givTokenMainnetAddress : givTokenGnosisAddress;
+  let token1Address = tokens[1].address.toLowerCase();
+  if (tokens[0].address.toLowerCase() !== givTokenAddress) {
+    token1Address = tokens[0].address.toLowerCase();
+  }
+  const defiLlamaGivId = `${chainString}:${givTokenAddress}`;
+  const defiLlamaWethId = `${chainString}:${token1Address}`;
+  const givSupply = tokens.find((i) => i.symbol === 'GIV').balance;
+  const wethSupply = tokens.find((i) => i.symbol === 'WETH').balance;
+  const idsSet = [defiLlamaGivId, defiLlamaWethId];
+  let prices = await utils.getData('https://coins.llama.fi/prices', {
+    coins: idsSet,
+  });
+  prices = prices.coins;
+  const givPrice = prices[defiLlamaGivId]?.price;
+  const wethPrice = prices[defiLlamaWethId]?.price;
+  const tvl =
+    BigNumber(givSupply) * givPrice + BigNumber(wethSupply) * wethPrice;
+  return tvl;
 };
 
 const calculateUnipoolApy = async (entry) => {
@@ -204,7 +223,8 @@ const buildPool = async (entry, chainString) => {
   return newObj;
 };
 
-const balancerTopLvlMain = async (poolId) => {
+const balancerTopLvlGivWeth = async () => {
+  const poolId = givEthBalancerPoolId;
   const chainString = 'ethereum';
   let data;
   let farmData = await request(
@@ -217,16 +237,15 @@ const balancerTopLvlMain = async (poolId) => {
     unipoolContractInfoQuery.replace('<PLACEHOLDER>', givEthBalancerAddress)
   );
   contractInfo = contractInfo.unipool;
-  farmData['reserveUSD'] = await calculateUnipoolTvl(
+  farmData['reserveUSD'] = await calculateBalancerTvl(
     chainString,
-    farmData.totalShares
+    farmData.tokens
   );
   farmData['apy'] = await balancerCalculatePoolApy(
     chainString,
     farmData,
     contractInfo
   );
-  console.log({ farmData, contractInfo });
 
   data = buildBalancerPool(farmData, chainString);
 
@@ -300,7 +319,7 @@ const main = async () => {
       unipoolContractInfoQuery,
       givDaiPairUnipoolContractInfo
     ),
-    balancerTopLvlMain(givEthBalancerPoolId),
+    balancerTopLvlGivWeth(),
   ]);
 
   return data;
