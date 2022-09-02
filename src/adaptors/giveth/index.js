@@ -13,7 +13,7 @@ const urlHoneyswapV2 =
 const urlGivEconomyMainnet =
   'https://api.thegraph.com/subgraphs/name/mateodaza/givpower-subgraph-mainnet';
 const urlGivEconomyGnosis =
-  'https://api.thegraph.com/subgraphs/name/giveth/giveth-economy-xdai';
+  'https://api.thegraph.com/subgraphs/name/mateodaza/giveth-economy-second-xdai';
 const urlBalancer =
   'https://api.thegraph.com/subgraphs/name/balancer-labs/balancer-v2';
 const urlIchi = 'https://api.ichi.org/v1/farms/20009';
@@ -327,10 +327,11 @@ const topLvl = async (
       contractInfoUrl,
       contractInfoQuery.replace('<PLACEHOLDER>', contractInfoAddress)
     );
+
     farmData = farmData.unipool;
     farmData['reserveUSD'] = await calculateUnipoolTvl(
       chainString,
-      farmData.totalSupply
+      farmData.totalSupply / 10 ** 18
     );
     farmData['apy'] = await calculateUnipoolApy(farmData);
 
@@ -368,6 +369,16 @@ const main = async () => {
       oneGivPairUnipoolContractInfo
     ),
     balancerTopLvlGivWeth(),
+    // Gnosis / xDAI
+    topLvl(
+      'xdai',
+      null,
+      tokenPairPoolQuery,
+      null,
+      urlGivEconomyGnosis,
+      unipoolContractInfoQuery,
+      givGnosisContractInfo
+    ),
   ]);
 
   return data;
