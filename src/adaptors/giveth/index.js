@@ -11,9 +11,9 @@ const urlUniswapV2 =
 const urlHoneyswapV2 =
   'https://api.thegraph.com/subgraphs/name/1hive/honeyswap-v2';
 const urlGivEconomyMainnet =
-  'https://api.thegraph.com/subgraphs/name/mateodaza/givpower-subgraph-mainnet';
+  'https://api.thegraph.com/subgraphs/name/giveth/giveth-economy-second-mainnet';
 const urlGivEconomyGnosis =
-  'https://api.thegraph.com/subgraphs/name/mateodaza/giveth-economy-second-xdai';
+  'https://api.thegraph.com/subgraphs/name/giveth/giveth-economy-second-xdai';
 const urlBalancer =
   'https://api.thegraph.com/subgraphs/name/balancer-labs/balancer-v2';
 const urlIchi = 'https://api.ichi.org/v1/farms/20009';
@@ -123,7 +123,7 @@ const balancerCalculatePoolApy = async (chainString, entry, contractInfo) => {
     : BigNumber(contractInfo.rewardRate)
         .div(totalSupply)
         .times(secsInOneYear)
-        .times('100')
+        .times('100') // Get Percentage
         .times(lp);
   return apr;
 };
@@ -136,10 +136,7 @@ const calculatePairApy = async (chainString, entry, contractInfo) => {
       ? entry.reserve1
       : entry.reserve0
   );
-  const lp = BigNumber(entry.totalSupply)
-    .times(10 ** 18)
-    .div(2)
-    .div(tokenReserve);
+  const lp = BigNumber(entry.totalSupply).div(2).div(tokenReserve);
 
   const totalSupply = BigNumber(contractInfo.totalSupply);
 
@@ -148,9 +145,8 @@ const calculatePairApy = async (chainString, entry, contractInfo) => {
     : BigNumber(contractInfo.rewardRate)
         .div(totalSupply)
         .times(secsInOneYear)
-        .times('100')
-        .times(lp)
-        .div(10 ** 18);
+        .times('100') // Get Percentage
+        .times(lp);
 
   return apr;
 };
@@ -285,7 +281,7 @@ const topLvlIchi = async (
     .times(givTokenPrice)
     .div(lpPrice)
     .times(secsInOneYear)
-    .times('100')
+    .times('100') // Get Percentage
     .plus(vaultIRR);
   farmData['apy'] = totalAPR;
   farmData['id'] = farmData.lpAddress;
