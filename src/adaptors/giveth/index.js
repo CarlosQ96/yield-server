@@ -339,25 +339,26 @@ const topLvl = async (
 
 const main = async () => {
   let data = await Promise.all([
+    // topLvl(                           // Discontinued
+    //   'ethereum',
+    //   null,
+    //   tokenPairPoolQuery,
+    //   null,
+    //   urlGivEconomyMainnet,
+    //   unipoolContractInfoQuery,
+    //   givMainnetContractInfo
+    // ),
+    // topLvl(                           // Discontinued
+    //   'ethereum',
+    //   urlUniswapV2,
+    //   tokenPairPoolQuery,
+    //   givDaiPairMainnetAddress,
+    //   urlGivEconomyMainnet,
+    //   unipoolContractInfoQuery,
+    //   givDaiPairUnipoolContractInfo
+    // ),
+
     // ETH Mainnet
-    topLvl(
-      'ethereum',
-      null,
-      tokenPairPoolQuery,
-      null,
-      urlGivEconomyMainnet,
-      unipoolContractInfoQuery,
-      givMainnetContractInfo
-    ),
-    topLvl(
-      'ethereum',
-      urlUniswapV2,
-      tokenPairPoolQuery,
-      givDaiPairMainnetAddress,
-      urlGivEconomyMainnet,
-      unipoolContractInfoQuery,
-      givDaiPairUnipoolContractInfo
-    ),
     topLvlIchi(
       'ethereum',
       urlGivEconomyMainnet,
